@@ -24,64 +24,77 @@ nltk.download("punkt")
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
+import numpy as np
+import plotly.graph_objects as go
 
-# Radar chart creation function
-def create_radar_chart(tfidf_array, terms, doc_index):
-    values = tfidf_array[doc_index]
-    angles = np.linspace(0, 2 * np.pi, len(terms), endpoint=False).tolist()
-    values = np.concatenate((values, [values[0]]))
-    angles += angles[:1]
-    
-    fig = go.Figure(go.Scatterpolar(
-        r=values,
-        theta=terms.tolist(),
-        fill='toself',
-        name=f'Document {doc_index + 1}',
-        line=dict(color='blue')
-    ))
-
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True, range=[0, max(values)*1.1])
-        ),
-        showlegend=False,
-        title=f"Radar Chart for Document {doc_index + 1}",
-        margin=dict(l=0, r=0, t=40, b=0)
-    )
-    return fig
-
-## We can input different Document groups, like NDC/LDA/etc.
 def create_radar_chart_group(tfidf_array, terms, selected_docs):
     # Sum the TF-IDF scores for the selected documents
     summed_values = np.sum(tfidf_array[selected_docs], axis=0)
-
+    
+    # Normalize the summed values using Min-Max scaling
+    min_val = np.min(summed_values)
+    max_val = np.max(summed_values)
+    normalized_values = (summed_values - min_val) / (max_val - min_val)
+    
     # Create the radar chart
     angles = np.linspace(0, 2 * np.pi, len(terms), endpoint=False).tolist()
     
     # Append the first value to make the radar chart "close"
-    summed_values = np.concatenate((summed_values, [summed_values[0]]))
+    normalized_values = np.concatenate((normalized_values, [normalized_values[0]]))
     angles += angles[:1]
 
     # Create the radar chart figure
     fig = go.Figure(go.Scatterpolar(
-        r=summed_values,
+        r=normalized_values,
         theta=terms.tolist(),
         fill='toself',
-        name='Summed TF-IDF for Selected Documents',
+        name='Normalized TF-IDF for Selected Documents',
         line=dict(color='blue')
     ))
 
     # Update the layout to display the chart
     fig.update_layout(
         polar=dict(
-            radialaxis=dict(visible=True, range=[0, max(summed_values)*1.1])
+            radialaxis=dict(visible=True, range=[0, 1])  # Set the range to [0, 1] for normalized values
         ),
         showlegend=False,
-        title="Radar Chart for Summed TF-IDF Scores",
+        title="Radar Chart for Normalized TF-IDF Scores",
         margin=dict(l=0, r=0, t=40, b=0)
     )
 
     return fig
+
+# def create_radar_chart_group(tfidf_array, terms, selected_docs):
+#     # Sum the TF-IDF scores for the selected documents
+#     summed_values = np.sum(tfidf_array[selected_docs], axis=0)
+
+#     # Create the radar chart
+#     angles = np.linspace(0, 2 * np.pi, len(terms), endpoint=False).tolist()
+    
+#     # Append the first value to make the radar chart "close"
+#     summed_values = np.concatenate((summed_values, [summed_values[0]]))
+#     angles += angles[:1]
+
+#     # Create the radar chart figure
+#     fig = go.Figure(go.Scatterpolar(
+#         r=summed_values,
+#         theta=terms.tolist(),
+#         fill='toself',
+#         name='Summed TF-IDF for Selected Documents',
+#         line=dict(color='blue')
+#     ))
+
+#     # Update the layout to display the chart
+#     fig.update_layout(
+#         polar=dict(
+#             radialaxis=dict(visible=True, range=[0, max(summed_values)*1.1])
+#         ),
+#         showlegend=False,
+#         title="Radar Chart for Summed TF-IDF Scores",
+#         margin=dict(l=0, r=0, t=40, b=0)
+#     )
+
+#     return fig
 
 
 def extend_with_synonyms(base_terms):
@@ -160,8 +173,7 @@ app.layout = dbc.Container([
             options=options,
             multi=True,
             placeholder="Select terms..."
-        ), width=8),
-        dcc.Graph(id='radar-chart', style={'height': '60vh'})
+        ), width=8)
     ]),
     
     html.Hr(),
@@ -186,16 +198,27 @@ app.layout = dbc.Container([
         ), width=8),
     ]),
 
+    dbc.Row([
+        dbc.Col(html.Label("Rader Chart for Selected Docuemnts"), width=4),
+        dcc.Graph(id='radar-chart', style={'height': '60vh'}),
+    ]),
+
     html.Hr(),
-    dcc.Slider(
-        id='threshold-slider',
-        min=0, max=1, step=0.01, value=0.1,
-        marks={0: '0', 0.5: '0.5', 1: '1'},
-        tooltip={'placement': 'bottom', 'always_visible': True}
-    ),
+
 
     dbc.Row([
+        # dbc.Col(html.Label("Co-occurence Network Edge Threshold"), width=4),
+        dcc.Slider(
+            id='threshold-slider',
+            min=0, max=1, step=0.01, value=0.1,
+            marks={0: '0', 0.5: '0.5', 1: '1'},
+            tooltip={'placement': 'bottom', 'always_visible': True}
+        ),
         dbc.Col(html.Button("Generate Graph", id="generate-btn", n_clicks=0), width=4),
+    ]),
+
+    dbc.Row([
+        # dbc.Col(html.Label("Co-occurence Network Graph"), width=4),
         dbc.Col(dcc.Graph(id="network-graph"), width=8),
     ]),
 
