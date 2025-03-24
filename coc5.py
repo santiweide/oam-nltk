@@ -202,24 +202,25 @@ def generate_graph(n_clicks_graph, selected_docs):
 
     def extract_lexicon_terms(text):
         tokens = word_tokenize(text.lower())
-        return list(set(synonym_to_term[token] for token in tokens if token in synonym_to_term))
+        positions = {token: idx for idx, token in enumerate(tokens) if token in synonym_to_term}
+        mapped_terms = {synonym_to_term[token]: positions[token] for token in positions}
+        return mapped_terms
 
     term_occurrences = {term: [] for term in oam_lexicon.keys()}
+    co_occurrence_matrix = np.zeros((len(oam_lexicon), len(oam_lexicon)))
+    lexicon_terms = list(oam_lexicon.keys())
+
     for doc in selected_texts:
-        terms_in_doc = extract_lexicon_terms(doc)
-        for term in terms_in_doc:
+        term_positions = extract_lexicon_terms(doc)
+        present_terms = list(term_positions.keys())
+        for term in present_terms:
             term_occurrences[term].append(doc)
 
-    lexicon_terms = list(oam_lexicon.keys())
-    co_occurrence_matrix = np.zeros((len(lexicon_terms), len(lexicon_terms)))
-
-    for doc in selected_texts:
-        present_terms = extract_lexicon_terms(doc)
         for i, j in combinations(present_terms, 2):
-            if i in lexicon_terms and j in lexicon_terms:
-                idx_i, idx_j = lexicon_terms.index(i), lexicon_terms.index(j)
-                co_occurrence_matrix[idx_i, idx_j] += 1
-                co_occurrence_matrix[idx_j, idx_i] += 1
+            idx_i, idx_j = lexicon_terms.index(i), lexicon_terms.index(j)
+            distance = abs(term_positions[i] - term_positions[j]) + 1
+            co_occurrence_matrix[idx_i, idx_j] += 1 / distance
+            co_occurrence_matrix[idx_j, idx_i] += 1 / distance
 
     if np.max(co_occurrence_matrix) > 0:
         co_occurrence_matrix /= np.max(co_occurrence_matrix)
@@ -267,7 +268,7 @@ def generate_graph(n_clicks_graph, selected_docs):
 
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
-        title="Lexicon Co-occurrence Graph",
+        title="Lexicon Co-occurrence Graph with Positional Weighting",
         showlegend=False,
         hovermode="closest",
         margin=dict(l=0, r=0, t=40, b=0),
