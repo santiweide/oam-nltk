@@ -3,33 +3,25 @@ from dash import dcc
 from dash import html
 import dash_bootstrap_components as dbc
 import networkx as nx
-import numpy as np
 import pandas as pd
-import dash_table
+from dash import dash_table
 import nltk
 import base64
 import io
 import plotly.graph_objects as go
 
+from dash.dash_table.Format import Group
 from dash.dependencies import Input, Output, State
-from nltk.tokenize import word_tokenize
-from sklearn.feature_extraction.text import TfidfVectorizer
 from itertools import combinations
 
-from dash.dependencies import Input, Output, State
 from nltk.tokenize import word_tokenize
-from sklearn.feature_extraction.text import TfidfVectorizer
-from itertools import combinations
 from flask_caching import Cache
 import numpy as np
 import spacy
-import nltk
 from nltk.corpus import wordnet as wn
 from collections import Counter
 from sklearn.preprocessing import normalize
-from sklearn.feature_extraction.text import TfidfVectorizer
 
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
