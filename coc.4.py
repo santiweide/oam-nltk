@@ -1,37 +1,88 @@
-import dash
+from collections import Counter
 from dash import dcc
 from dash import html
+from dash.dependencies import Input, Output, State
+from flask_caching import Cache
+from itertools import combinations
+from nltk.corpus import wordnet as wn
+from nltk.tokenize import word_tokenize
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import normalize
+import base64
+import dash
 import dash_bootstrap_components as dbc
+from dash import dash_table
+import io
+
 import networkx as nx
+import nltk
 import numpy as np
 import pandas as pd
-import dash_table
-import nltk
-import base64
-import io
 import plotly.graph_objects as go
-
-from dash.dependencies import Input, Output, State
-from nltk.tokenize import word_tokenize
-from sklearn.feature_extraction.text import TfidfVectorizer
-from itertools import combinations
-
-from dash.dependencies import Input, Output, State
-from nltk.tokenize import word_tokenize
-from sklearn.feature_extraction.text import TfidfVectorizer
-from itertools import combinations
-from flask_caching import Cache
-import numpy as np
 import spacy
-import nltk
-from nltk.corpus import wordnet as wn
-from collections import Counter
-from sklearn.preprocessing import normalize
-from sklearn.feature_extraction.text import TfidfVectorizer
-
 nltk.download("punkt")
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+
+
+# Radar chart creation function
+def create_radar_chart(tfidf_array, terms, doc_index):
+    values = tfidf_array[doc_index]
+    angles = np.linspace(0, 2 * np.pi, len(terms), endpoint=False).tolist()
+    values = np.concatenate((values, [values[0]]))
+    angles += angles[:1]
+    
+    fig = go.Figure(go.Scatterpolar(
+        r=values,
+        theta=terms.tolist(),
+        fill='toself',
+        name=f'Document {doc_index + 1}',
+        line=dict(color='blue')
+    ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, max(values)*1.1])
+        ),
+        showlegend=False,
+        title=f"Radar Chart for Document {doc_index + 1}",
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    return fig
+
+## We can input different Document groups, like NDC/LDA/etc.
+def create_radar_chart_group(tfidf_array, terms, selected_docs):
+    # Sum the TF-IDF scores for the selected documents
+    summed_values = np.sum(tfidf_array[selected_docs], axis=0)
+
+    # Create the radar chart
+    angles = np.linspace(0, 2 * np.pi, len(terms), endpoint=False).tolist()
+    
+    # Append the first value to make the radar chart "close"
+    summed_values = np.concatenate((summed_values, [summed_values[0]]))
+    angles += angles[:1]
+
+    # Create the radar chart figure
+    fig = go.Figure(go.Scatterpolar(
+        r=summed_values,
+        theta=terms.tolist(),
+        fill='toself',
+        name='Summed TF-IDF for Selected Documents',
+        line=dict(color='blue')
+    ))
+
+    # Update the layout to display the chart
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, max(summed_values)*1.1])
+        ),
+        showlegend=False,
+        title="Radar Chart for Summed TF-IDF Scores",
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+
+    return fig
+
 
 def extend_with_synonyms(base_terms):
     expanded = set(base_terms)
@@ -110,6 +161,7 @@ app.layout = dbc.Container([
             multi=True,
             placeholder="Select terms..."
         ), width=8),
+        dcc.Graph(id='radar-chart', style={'height': '60vh'})
     ]),
     
     html.Hr(),
@@ -175,6 +227,7 @@ def upload_documents(contents, filenames):
     Output("network-graph", "figure"),
     Output("download-dataframe-xlsx", "data"),
     Output("table-container", "children"),
+    Output("radar-chart", "figure"), 
     Input("generate-btn", "n_clicks"),
     Input("download-btn", "n_clicks"),
     Input("threshold-slider", "value"),
@@ -183,7 +236,7 @@ def upload_documents(contents, filenames):
 )
 def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
     if not selected_docs:
-        return go.Figure(), None, html.Div("No data available")
+        return go.Figure(), None, html.Div("No data available"), go.Figure()
 
     selected_texts = [documents[i][1] for i in selected_docs]
 
@@ -198,7 +251,11 @@ def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
     tfidf_matrix = vectorizer.fit_transform(processed_docs)
     terms = vectorizer.get_feature_names_out()
 
-    # TODO export the tfidf_matrix.toarray() to excel
+    tfidf_array = tfidf_matrix.toarray()
+    tfidf_df = pd.DataFrame(tfidf_array, columns=terms)
+    # Export the TF-IDF and Co-occurrence matrices to Excel
+    with pd.ExcelWriter('tfidf_matrix.xlsx', engine='openpyxl') as writer:
+        tfidf_df.to_excel(writer, sheet_name='TF-IDF Matrix')
 
     # Calculate Co-occurrence Matrix
     co_occurrence_matrix = np.zeros((len(terms), len(terms)))
@@ -317,7 +374,10 @@ def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
         margin=dict(l=0, r=0, t=40, b=0),
     )
 
-    return fig, None, combined_table
+    # **Create Radar Chart (New Addition)**
+    radar_chart = create_radar_chart_group(tfidf_array, terms, selected_docs)  # Using the first document for illustration
+
+    return fig, None, combined_table, radar_chart
 
 if __name__ == "__main__":
     app.run_server(debug=True)
