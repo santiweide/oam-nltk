@@ -198,6 +198,8 @@ def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
     tfidf_matrix = vectorizer.fit_transform(processed_docs)
     terms = vectorizer.get_feature_names_out()
 
+    # TODO export the tfidf_matrix.toarray() to excel
+
     # Calculate Co-occurrence Matrix
     co_occurrence_matrix = np.zeros((len(terms), len(terms)))
     for doc_vector in tfidf_matrix.toarray():

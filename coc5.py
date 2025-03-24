@@ -25,6 +25,84 @@ from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
+import torch
+import numpy as np
+from transformers import BertTokenizer, BertModel
+from collections import defaultdict
+from itertools import combinations
+from sklearn.metrics.pairwise import cosine_similarity
+from nltk.tokenize import word_tokenize
+
+# Load pre-trained BERT model and tokenizer
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+model = BertModel.from_pretrained('bert-base-uncased')
+
+# Function to get the embeddings for a sentence using BERT
+def get_bert_embeddings(text):
+    inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True, max_length=512)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    # Get the last hidden state (embeddings for each token)
+    embeddings = outputs.last_hidden_state
+    # We average the embeddings of all tokens to get the sentence embedding
+    sentence_embedding = embeddings.mean(dim=1).squeeze().numpy()
+    return sentence_embedding
+
+# Function to extract lexicon terms from text
+def extract_lexicon_terms(text, lexicon_terms):
+    tokens = word_tokenize(text.lower())
+    return [(token, idx) for idx, token in enumerate(tokens) if token in lexicon_terms]
+
+# Function to compute pairwise cosine similarity between embeddings
+def compute_cosine_similarity(embedding1, embedding2):
+    return cosine_similarity([embedding1], [embedding2])[0][0]
+
+# Learning the co-occurrence matrix based on proximity
+def learn_lexicon_embeddings(selected_docs, oam_lexicon):
+    # Initialize a dictionary to store the embeddings for each lexicon term
+    term_embeddings = defaultdict(list)
+    co_occurrence_matrix = np.zeros((len(oam_lexicon), len(oam_lexicon)))
+
+    # List of lexicon terms
+    lexicon_terms = list(oam_lexicon.keys())
+
+    # Iterate over the selected documents
+    for doc in selected_docs:
+        # Get the list of lexicon terms with their positions
+        lexicon_term_positions = extract_lexicon_terms(doc, oam_lexicon)
+        
+        # Get BERT embeddings for the entire document
+        doc_embedding = get_bert_embeddings(doc)
+
+        # For each pair of lexicon terms in the document, compute their cosine similarity
+        for (term1, idx1), (term2, idx2) in combinations(lexicon_term_positions, 2):
+            if term1 in lexicon_terms and term2 in lexicon_terms:
+                # Get embeddings for the terms
+                embedding1 = get_bert_embeddings(term1)
+                embedding2 = get_bert_embeddings(term2)
+
+                # Compute the cosine similarity
+                similarity = compute_cosine_similarity(embedding1, embedding2)
+
+                # Adjust similarity based on their proximity (inverse of distance)
+                distance = abs(idx1 - idx2)  # Proximity: lower distance means higher similarity
+                proximity_factor = 1 / (1 + distance)  # Inverse of distance
+                weighted_similarity = similarity * proximity_factor
+
+                # Get indices for the terms in the lexicon
+                idx_i = lexicon_terms.index(term1)
+                idx_j = lexicon_terms.index(term2)
+
+                # Update the co-occurrence matrix with the weighted similarity
+                co_occurrence_matrix[idx_i, idx_j] += weighted_similarity
+                co_occurrence_matrix[idx_j, idx_i] += weighted_similarity
+
+    # Normalize the co-occurrence matrix
+    if np.max(co_occurrence_matrix) > 0:
+        co_occurrence_matrix /= np.max(co_occurrence_matrix)
+
+    # Return the updated co-occurrence matrix
+    return co_occurrence_matrix
 
 nltk.download("punkt")
 
@@ -190,43 +268,30 @@ def generate_graph(n_clicks_graph, selected_docs):
     if not selected_docs:
         return go.Figure(), html.Div("No data available")
 
+    # Get the texts of the selected documents
     selected_texts = [documents[i][1] for i in selected_docs]
 
-    def extract_lexicon_terms(text):
-        tokens = word_tokenize(text.lower())
-        positions = {token: idx for idx, token in enumerate(tokens) if token in synonym_to_term}
-        mapped_terms = {synonym_to_term[token]: positions[token] for token in positions}
-        return mapped_terms
+    # Get BERT embeddings for each document
+    doc_embeddings = [get_bert_embeddings(doc) for doc in selected_texts]
 
-    term_occurrences = {term: [] for term in oam_lexicon.keys()}
-    co_occurrence_matrix = np.zeros((len(oam_lexicon), len(oam_lexicon)))
-    lexicon_terms = list(oam_lexicon.keys())
+    # Create a co-occurrence matrix based on cosine similarity of embeddings
+    num_docs = len(selected_texts)
+    co_occurrence_matrix = learn_lexicon_embeddings(selected_texts, oam_lexicon)
 
-    for doc in selected_texts:
-        term_positions = extract_lexicon_terms(doc)
-        present_terms = list(term_positions.keys())
-        for term in present_terms:
-            term_occurrences[term].append(doc)
+    print(co_occurrence_matrix)
 
-        for i, j in combinations(present_terms, 2):
-            idx_i, idx_j = lexicon_terms.index(i), lexicon_terms.index(j)
-            distance = abs(term_positions[i] - term_positions[j]) + 1
-            co_occurrence_matrix[idx_i, idx_j] += 1 / distance
-            co_occurrence_matrix[idx_j, idx_i] += 1 / distance
-
-    if np.max(co_occurrence_matrix) > 0:
-        co_occurrence_matrix /= np.max(co_occurrence_matrix)
-
+    # Create a graph
     G = nx.Graph()
-    for term in lexicon_terms:
-        G.add_node(term, color='blue', type='lexicon')
+    for i, doc in enumerate(selected_texts):
+        G.add_node(i, label=f"Doc {i + 1}")
 
-    for i in range(len(lexicon_terms)):
-        for j in range(i + 1, len(lexicon_terms)):
+    for i in range(num_docs):
+        for j in range(i + 1, num_docs):
             weight = co_occurrence_matrix[i, j]
             if weight > 0:
-                G.add_edge(lexicon_terms[i], lexicon_terms[j], weight=weight)
+                G.add_edge(i, j, weight=weight)
 
+    # Define positions for the nodes
     pos = nx.spring_layout(G, seed=42)
     edge_x, edge_y = [], []
     for edge in G.edges():
@@ -240,8 +305,9 @@ def generate_graph(n_clicks_graph, selected_docs):
         x, y = pos[node]
         node_x.append(x)
         node_y.append(y)
-        node_text.append(node)
+        node_text.append(G.nodes[node]['label'])
 
+    # Create the edge trace
     edge_trace = go.Scatter(
         x=edge_x, y=edge_y,
         line=dict(width=1, color="gray"),
@@ -249,6 +315,7 @@ def generate_graph(n_clicks_graph, selected_docs):
         mode="lines"
     )
 
+    # Create the node trace
     node_trace = go.Scatter(
         x=node_x, y=node_y,
         mode="markers+text",
@@ -258,24 +325,26 @@ def generate_graph(n_clicks_graph, selected_docs):
         marker=dict(size=15, color="lightblue", line=dict(width=2, color="black"))
     )
 
+    # Create the figure
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
-        title="Lexicon Co-occurrence Graph with Positional Weighting",
+        title="Document Co-occurrence Graph",
         showlegend=False,
         hovermode="closest",
         margin=dict(l=0, r=0, t=40, b=0),
     )
 
-    table_data = [{"Lexicon Term": term, "Associated Documents": ", ".join(term_occurrences[term])} for term in lexicon_terms]
+    # Create the table for document-co-occurrence mapping
+    table_data = [{"Document": f"Doc {i + 1}", "Co-occurrence With": ", ".join([f"Doc {j + 1}" for j in range(num_docs) if i != j and co_occurrence_matrix[i, j] > 0])} for i in range(num_docs)]
     table_component = dash_table.DataTable(
         data=table_data,
-        columns=[{"name": col, "id": col} for col in ["Lexicon Term", "Associated Documents"]],
+        columns=[{"name": col, "id": col} for col in ["Document", "Co-occurrence With"]],
         style_table={'overflowX': 'scroll', 'maxHeight': '500px', 'overflowY': 'auto'},
         style_cell={'textAlign': 'center'},
         page_size=10
     )
 
-    return fig, html.Div([html.H4("Lexicon-Term Mapping"), table_component])
+    return fig, html.Div([html.H4("Document Co-occurrence Mapping"), table_component])
 
 if __name__ == "__main__":
     app.run_server(debug=True)
