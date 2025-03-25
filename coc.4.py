@@ -13,7 +13,7 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import dash_table
 import io
-
+import math
 import networkx as nx
 import nltk
 import numpy as np
@@ -29,12 +29,15 @@ import plotly.graph_objects as go
 
 def create_radar_chart_group(tfidf_array, terms, selected_docs):
     # Sum the TF-IDF scores for the selected documents
+    print(f"debug radar graph, tfidf_array.shape={tfidf_array.shape}, select_docs={selected_docs}")
+
     summed_values = np.sum(tfidf_array[selected_docs], axis=0)
     
     # Normalize the summed values using Min-Max scaling
     min_val = np.min(summed_values)
     max_val = np.max(summed_values)
     normalized_values = (summed_values - min_val) / (max_val - min_val)
+    # normalized_values = np.log(normalized_values)
     
     # Create the radar chart
     angles = np.linspace(0, 2 * np.pi, len(terms), endpoint=False).tolist()
@@ -48,7 +51,8 @@ def create_radar_chart_group(tfidf_array, terms, selected_docs):
         r=normalized_values,
         theta=terms.tolist(),
         fill='toself',
-        name='Normalized TF-IDF for Selected Documents',
+        name = '',
+        # name='Normalized TF-IDF for Selected Documents',
         line=dict(color='blue')
     ))
 
@@ -63,39 +67,6 @@ def create_radar_chart_group(tfidf_array, terms, selected_docs):
     )
 
     return fig
-
-# def create_radar_chart_group(tfidf_array, terms, selected_docs):
-#     # Sum the TF-IDF scores for the selected documents
-#     summed_values = np.sum(tfidf_array[selected_docs], axis=0)
-
-#     # Create the radar chart
-#     angles = np.linspace(0, 2 * np.pi, len(terms), endpoint=False).tolist()
-    
-#     # Append the first value to make the radar chart "close"
-#     summed_values = np.concatenate((summed_values, [summed_values[0]]))
-#     angles += angles[:1]
-
-#     # Create the radar chart figure
-#     fig = go.Figure(go.Scatterpolar(
-#         r=summed_values,
-#         theta=terms.tolist(),
-#         fill='toself',
-#         name='Summed TF-IDF for Selected Documents',
-#         line=dict(color='blue')
-#     ))
-
-#     # Update the layout to display the chart
-#     fig.update_layout(
-#         polar=dict(
-#             radialaxis=dict(visible=True, range=[0, max(summed_values)*1.1])
-#         ),
-#         showlegend=False,
-#         title="Radar Chart for Summed TF-IDF Scores",
-#         margin=dict(l=0, r=0, t=40, b=0)
-#     )
-
-#     return fig
-
 
 def extend_with_synonyms(base_terms):
     expanded = set(base_terms)
@@ -167,18 +138,6 @@ app.layout = dbc.Container([
     html.H1("Keyword Co-occurrence Graph Analysis"),
 
     dbc.Row([
-        dbc.Col(html.Label("Select Terms from OAM Lexicon"), width=4),
-        dbc.Col(dcc.Dropdown(
-            id="lexicon-dropdown",
-            options=options,
-            multi=True,
-            placeholder="Select terms..."
-        ), width=8)
-    ]),
-    
-    html.Hr(),
-
-    dbc.Row([
         dbc.Col(html.Label("Upload Text Files"), width=4),
         dbc.Col(dcc.Upload(
             id="upload-data",
@@ -188,7 +147,6 @@ app.layout = dbc.Container([
     ]),
 
     html.Hr(),
-
     dbc.Row([
         dbc.Col(html.Label("Select Documents"), width=4),
         dbc.Col(dcc.Dropdown(
@@ -197,6 +155,7 @@ app.layout = dbc.Container([
             multi=True
         ), width=8),
     ]),
+    html.Hr(),
 
     dbc.Row([
         dbc.Col(html.Label("Rader Chart for Selected Docuemnts"), width=4),
@@ -241,9 +200,26 @@ def upload_documents(contents, filenames):
     global documents
     if contents:
         for content, filename in zip(contents, filenames):
+            print(f"debug [upload_documents] {filename}")
             content_str = base64.b64decode(content.split(",")[1]).decode("utf-8")
             documents.append((filename, content_str))
-    return [{"label": doc[0], "value": i} for i, doc in enumerate(documents)]
+    options = [{"label": doc[0], "value": i} for i, doc in enumerate(documents)]
+    options.append({"label": "Select All", "value": "all"})
+    return options
+
+# New callback to handle "Select All" logic
+@app.callback(
+    Output("document-dropdown", "value"),
+    Input("document-dropdown", "value"),
+    State("document-dropdown", "options"),
+    prevent_initial_call=True
+)
+def select_all_documents(selected_values, options):
+    if selected_values and "all" in selected_values:
+        # Extract all document indices (excluding "all")
+        doc_indices = [opt["value"] for opt in options if opt["value"] != "all"]
+        return doc_indices
+    return selected_values
 
 
 @app.callback(
@@ -254,13 +230,17 @@ def upload_documents(contents, filenames):
     Input("generate-btn", "n_clicks"),
     Input("download-btn", "n_clicks"),
     Input("threshold-slider", "value"),
-    State("document-dropdown", "value"),
+    Input("document-dropdown", "value"),
     prevent_initial_call=True
 )
 def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
     if not selected_docs:
         return go.Figure(), None, html.Div("No data available"), go.Figure()
 
+    # print(f"debug log {selected_docs}, \
+    #     with type(documents)={type(documents)}, \
+    #     type(selected_docs)={type(selected_docs)}, \
+    #     selected_docs={selected_docs}")
     selected_texts = [documents[i][1] for i in selected_docs]
 
     def preprocess_text(text):
@@ -391,13 +371,15 @@ def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
 
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
-        title="Keyword Co-occurrence Graph",
+        title='',
+        # title="Keyword Co-occurrence Graph",
         showlegend=False,
         hovermode="closest",
         margin=dict(l=0, r=0, t=40, b=0),
     )
 
     # **Create Radar Chart (New Addition)**
+    # print(f"debug tfidf_array={tfidf_array}, type={type(tfidf_array)}, shape={tfidf_array.shape}")
     radar_chart = create_radar_chart_group(tfidf_array, terms, selected_docs)  # Using the first document for illustration
 
     return fig, None, combined_table, radar_chart
