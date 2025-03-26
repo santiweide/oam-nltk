@@ -14,4 +14,4 @@ coc.5.py
 
 
 
-
+pip install -r requirements.txt

@@ -33,11 +33,6 @@ def create_radar_chart_group(tfidf_array, terms, selected_docs):
 
     summed_values = np.sum(tfidf_array[selected_docs], axis=0)
     
-# Another choice Normalize the summed values using Min-Max scaling
-#     min_val = np.min(summed_values)
-#     max_val = np.max(summed_values)
-#     normalized_values = (summed_values - min_val) / (max_val - min_val)
-
     # Apply log transformation to summed_values to mitigate extreme values
     log_summed = np.log(summed_values + 1)  # Add 1 to avoid log(0)
     min_log = np.min(log_summed)
