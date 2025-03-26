@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import spacy
+from scipy.stats import fisher_exact
+
 nltk.download("punkt")
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
@@ -129,6 +131,10 @@ app.layout = dbc.Container([
     html.Hr(),
     dbc.Row([
         dbc.Col(dcc.Graph(id="network-graph"), width=12)
+    ]),
+    html.Hr(),
+    dbc.Row([
+        dbc.Col(dcc.Graph(id="sig-graph"), width=12)
     ]),
 
     html.Hr(),
@@ -240,24 +246,38 @@ def create_network_figure(matrix):
     
     return fig
 
+def calculate_association_significance(focus_term, association, corpus):
+    # Contingency table: [a: both occur, b: focus only, c: association only, d: neither]
+    a = sum(1 for doc in corpus if focus_term in doc and association in doc)
+    b = sum(1 for doc in corpus if focus_term in doc and association not in doc)
+    c = sum(1 for doc in corpus if focus_term not in doc and association in doc)
+    d = sum(1 for doc in corpus if focus_term not in doc and association not in doc)
+    
+    # Perform Fisher's Exact Test
+    odds_ratio, p_value = fisher_exact([[a, b], [c, d]])
+    return odds_ratio, p_value
+
 @app.callback(
     Output("matrix-table", "data"),
     Output("matrix-table", "columns"),
     Output("network-graph", "figure"),  # Add this output
+    Output("sig-graph", "figure"),  # Add this output
     Input("document-dropdown", "value"),
     Input("window-size-slider", "value"),
     prevent_initial_call=True
 )
 def update_matrix(selected_docs, window_size):
     if not selected_docs or not documents:
-        return [], [], go.Figure()
+        return [], [], go.Figure(), go.Figure()
     
     print(terms)
     matrix = np.zeros((len(terms), len(terms)))
+    significance_matrix = np.zeros((len(terms), len(terms)))
+
     term_to_index = {term: i for i, term in enumerate(terms)}
-    print(f"debug synonym_to_term={synonym_to_term}\n length of the selected docs={len(selected_docs)}")
+    # print(f"debug synonym_to_term={synonym_to_term}\n length of the selected docs={len(selected_docs)}")
     # Process documents
-    print()
+    corpus = [documents[doc_idx][1].lower() for doc_idx in selected_docs]  # Preprocess the selected documents
     for doc_idx in selected_docs:
         text = documents[doc_idx][1].lower()
         tokens = nltk.word_tokenize(text)
@@ -271,6 +291,12 @@ def update_matrix(selected_docs, window_size):
                     idx2 = term_to_index[synonym_to_term[term2]]
                     matrix[idx1, idx2] += 1
                     matrix[idx2, idx1] += 1 
+
+                    # Perform significance testing (Fisher's Exact Test)
+                    odds_ratio, p_value = calculate_association_significance(term1, term2, corpus)
+                    significance_matrix[idx1, idx2] = p_value
+                    significance_matrix[idx2, idx1] = p_value  # Symmetric matrix for p-values
+    
     print(matrix)
     sum_val = matrix.sum()
     matrix /= sum_val
@@ -283,7 +309,15 @@ def update_matrix(selected_docs, window_size):
 
     network_fig = create_network_figure(matrix)
     
-    return data, columns, network_fig
+    significance_fig = go.Figure(data=go.Heatmap(
+        z=significance_matrix,
+        x=terms,
+        y=terms,
+        colorscale='Viridis',
+        colorbar=dict(title="p-value"),
+    ))
+
+    return data, columns, network_fig, significance_fig
 
 if __name__ == "__main__":
     app.run_server(debug=True)
