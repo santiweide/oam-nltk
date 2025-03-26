@@ -120,12 +120,16 @@ app.layout = dbc.Container([
         dbc.Col(html.Label("Sliding Window Size"), width=4),
         dbc.Col(dcc.Slider(
             id='window-size-slider',
-            min=50, max=200, step=50, value=100,
-            marks={i: str(i*50) for i in range(1, 4)},
+            min=30, max=180, step=30, value=90,
+            marks={i: str(i*30) for i in range(1, 6)},
             tooltip={'placement': 'bottom', 'always_visible': True}
         ), width=8),
     ]),
     
+    dbc.Row([
+        dbc.Col(dcc.Graph(id="network-graph"), width=12)
+    ]),
+
     # Matrix display
     dbc.Row([
         dbc.Col(dash_table.DataTable(
@@ -165,17 +169,86 @@ def select_all_documents(selected_values, options):
         return doc_indices
     return selected_values
 
+def create_network_figure(matrix):
+    """Create network visualization from co-occurrence matrix"""
+    G = nx.Graph()
+    
+    # Add nodes
+    for term in terms:
+        G.add_node(term)
+        
+    # Add edges with weights
+    for i in range(len(terms)):
+        for j in range(i+1, len(terms)):
+            if matrix[i,j] > 0:
+                G.add_edge(terms[i], terms[j], weight=matrix[i,j])
+    
+    # Use force-directed layout with edge weights
+    pos = nx.spring_layout(G, weight='weight', seed=42)
+    
+    # Create Plotly figure
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+        
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines')
+
+    node_x = []
+    node_y = []
+    text = []
+    for node in G.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        text.append(node)
+        
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers+text',
+        text=text,
+        textposition="top center",
+        hoverinfo='text',
+        marker=dict(
+            showscale=True,
+            colorscale='YlGnBu',
+            size=10,
+            color=[],
+            line_width=2))
+    
+    # Color nodes by degree
+    node_degrees = dict(G.degree())
+    node_trace.marker.color = [node_degrees[node] for node in G.nodes()]
+    node_trace.text = text
+    
+    fig = go.Figure(data=[edge_trace, node_trace],
+                 layout=go.Layout(
+                    showlegend=False,
+                    hovermode='closest',
+                    margin=dict(b=0,l=0,r=0,t=0),
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
+    
+    return fig
 
 @app.callback(
     Output("matrix-table", "data"),
     Output("matrix-table", "columns"),
+    Output("network-graph", "figure"),  # Add this output
     Input("document-dropdown", "value"),
     Input("window-size-slider", "value"),
     prevent_initial_call=True
 )
 def update_matrix(selected_docs, window_size):
     if not selected_docs or not documents:
-        return [], []
+        return [], [], go.Figure()
     
     print(terms)
     matrix = np.zeros((len(terms), len(terms)))
@@ -197,13 +270,20 @@ def update_matrix(selected_docs, window_size):
                     matrix[idx1, idx2] += 1
                     matrix[idx2, idx1] += 1 
     print(matrix)
+    sum_val = matrix.sum()
+    matrix /= sum_val
+
     data = []
     for row in matrix:
         data.append({terms[i]: row[i] for i in range(len(terms))})
 
     columns = [{"name": term, "id": term} for term in terms]
 
-    return data, columns
+    network_fig = create_network_figure(matrix)
+    
+    return data, columns, network_fig
 
 if __name__ == "__main__":
     app.run_server(debug=True)
+
+

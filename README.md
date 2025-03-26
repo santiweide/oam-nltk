@@ -15,3 +15,6 @@ coc.5.py
 
 
 pip install -r requirements.txt
+
+
+PMI calculates the strength of association between terms by considering how much more frequently they co-occur than would be expected under random chance.
