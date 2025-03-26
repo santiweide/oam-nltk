@@ -158,6 +158,12 @@ app.layout = dbc.Container([
         dcc.Graph(id='radar-chart', style={'height': '60vh'}),
     ]),
 
+    html.Hr(),
+    
+    dbc.Row([
+        dbc.Col(html.Button("Download TF-IDF Matrix", id="download-button", n_clicks=0), width=4),
+        dbc.Col(dcc.Download(id="download-tfidf"), width=8),
+    ])
 ])
 
 @app.callback(
@@ -193,6 +199,7 @@ def select_all_documents(selected_values, options):
 
 @app.callback(
     Output("radar-chart", "figure"), 
+    Output("download-tfidf", "data"),
     Input("document-dropdown", "value"),
     prevent_initial_call=True
 )
@@ -214,6 +221,13 @@ def generate_graph(selected_docs):
 
     tfidf_array = tfidf_matrix.toarray()
 
+    ## for download
+    tfidf_df = pd.DataFrame(tfidf_array, columns=terms)
+    csv_buffer = io.StringIO()
+    tfidf_df.to_csv(csv_buffer, index=False)
+    csv_data = csv_buffer.getvalue()
+    b64_csv = base64.b64encode(csv_data.encode()).decode()
+
     # Export the TF-IDF and Co-occurrence matrices to Excel
     tfidf_df = pd.DataFrame(tfidf_array, columns=terms)
     with pd.ExcelWriter('tfidf_matrix.xlsx', engine='openpyxl') as writer:
@@ -221,7 +235,7 @@ def generate_graph(selected_docs):
 
     radar_chart = create_radar_chart_group(tfidf_array, terms, selected_docs)  # Using the first document for illustration
 
-    return radar_chart
+    return radar_chart, dict(content=b64_csv, filename="tfidf_matrix.csv")
 
 if __name__ == "__main__":
     app.run_server(debug=True)
