@@ -1,20 +1,19 @@
 # oam-nltk
 
 
-coc.4.py
-* TF-IDF embedding
-* Threshold on edge generation
-* Select all documents
-* Radar graph based on TFIDF
-* LDA extention of the symentics of the words
+co-occurence.sliding.window.py
+Feature:
+* map documents with oam lexicons
+* use sliding window to see the co-occurence frenquency and words' relationship
+* provide original matrix and also a graph built based on normalized weight
 
-coc.5.py
-* Bert embedding as pre-trained word-embedding to cover context information
-* add positional information for each term in document
+tfidf.radar.matrix.py
+Feature:
+* map documents with oam lexicons
+* gather the result into tfidf matrix to filter tops
+* and show results in radar graph.
 
-
-
+### Pre install packages
+```bash
 pip install -r requirements.txt
-
-
-PMI calculates the strength of association between terms by considering how much more frequently they co-occur than would be expected under random chance.
+```

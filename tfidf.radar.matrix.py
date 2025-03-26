@@ -118,8 +118,7 @@ oam_lexicon = {
     "income groups": extend_with_synonyms(["income groups"]),
     "local governance": extend_with_synonyms(["local governance"])
 }
-
-# Grouped options
+## TODO a higher level Radar graph
 lexicon_groups = {
     "Demographic Groups": ["women", "youth", "children", "farmers", "pastoralists", "fishers", "cross-border traders", "displaced populations", "refugees", "MSMEs"],
     "Geographic Areas": ["rural areas", "urban areas", "cross-border areas", "high risk", "low risk", "conflict affected"],
@@ -127,17 +126,12 @@ lexicon_groups = {
     "Ownership & Partnerships": ["state capacity", "debt sustainability", "implementation", "partnerships", "income groups", "local governance"]
 }
 
-options = []
-for category, items in lexicon_groups.items():
-    options.append({"label": category, "value": category, "disabled": True})  # Group label
-    options.extend({"label": f"\u2003 {item}", "value": item} for item in items)  # Indented items
-
 synonym_to_term = {syn: term for term, synonyms in oam_lexicon.items() for syn in synonyms}
 
 documents = []
 
 app.layout = dbc.Container([
-    html.H1("Keyword Co-occurrence Graph Analysis"),
+    html.H1("Radar Graph based on TF-IDF"),
 
     dbc.Row([
         dbc.Col(html.Label("Upload Text Files"), width=4),
@@ -164,33 +158,6 @@ app.layout = dbc.Container([
         dcc.Graph(id='radar-chart', style={'height': '60vh'}),
     ]),
 
-    html.Hr(),
-
-
-    dbc.Row([
-        # dbc.Col(html.Label("Co-occurence Network Edge Threshold"), width=4),
-        dcc.Slider(
-            id='threshold-slider',
-            min=0, max=1, step=0.01, value=0.1,
-            marks={0: '0', 0.5: '0.5', 1: '1'},
-            tooltip={'placement': 'bottom', 'always_visible': True}
-        ),
-        dbc.Col(html.Button("Generate Graph", id="generate-btn", n_clicks=0), width=4),
-    ]),
-
-    dbc.Row([
-        # dbc.Col(html.Label("Co-occurence Network Graph"), width=4),
-        dbc.Col(dcc.Graph(id="network-graph"), width=8),
-    ]),
-
-    html.Hr(),
-    html.Div(id="table-container"),  # This ensures the table is included in the layout
-
-
-    dbc.Row([
-        dbc.Col(html.Button("Download Co-occurrence Matrix", id="download-btn", n_clicks=0)),
-        dcc.Download(id="download-dataframe-xlsx")
-    ]),
 ])
 
 @app.callback(
@@ -225,17 +192,11 @@ def select_all_documents(selected_values, options):
 
 
 @app.callback(
-    Output("network-graph", "figure"),
-    Output("download-dataframe-xlsx", "data"),
-    Output("table-container", "children"),
     Output("radar-chart", "figure"), 
-    Input("generate-btn", "n_clicks"),
-    Input("download-btn", "n_clicks"),
-    Input("threshold-slider", "value"),
     Input("document-dropdown", "value"),
     prevent_initial_call=True
 )
-def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
+def generate_graph(selected_docs):
     if not selected_docs:
         return go.Figure(), None, html.Div("No data available"), go.Figure()
 
@@ -247,139 +208,20 @@ def generate_graph(n_clicks_graph, n_clicks_download, threshold, selected_docs):
 
     processed_docs = [preprocess_text(doc) for doc in selected_texts]
 
-    # Calculate TF-IDF
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(processed_docs)
     terms = vectorizer.get_feature_names_out()
 
     tfidf_array = tfidf_matrix.toarray()
-    tfidf_df = pd.DataFrame(tfidf_array, columns=terms)
+
     # Export the TF-IDF and Co-occurrence matrices to Excel
+    tfidf_df = pd.DataFrame(tfidf_array, columns=terms)
     with pd.ExcelWriter('tfidf_matrix.xlsx', engine='openpyxl') as writer:
         tfidf_df.to_excel(writer, sheet_name='TF-IDF Matrix')
 
-    # Calculate Co-occurrence Matrix
-    co_occurrence_matrix = np.zeros((len(terms), len(terms)))
-    for doc_vector in tfidf_matrix.toarray():
-        indices = np.where(doc_vector > 0)[0]
-        for i, j in combinations(indices, 2):
-            co_occurrence_matrix[i, j] += 1
-            co_occurrence_matrix[j, i] += 1
-
-    # Normalization
-    if np.max(co_occurrence_matrix) > 0:
-        co_occurrence_matrix /= np.max(co_occurrence_matrix)
-
-    # Apply threshold
-    co_matrix_df = pd.DataFrame(np.where(co_occurrence_matrix >= threshold, co_occurrence_matrix, 0),
-                                 index=terms, columns=terms)
-    
-    lexicon_embeddings = {term: [] for term in terms}
-    for i, doc in enumerate(processed_docs):
-        for term in terms:
-            if term in doc:
-                lexicon_embeddings[term].append(f"Document {selected_docs[i]}")
-    
-    embedding_df = pd.DataFrame([(term, ", ".join(docs)) for term, docs in lexicon_embeddings.items()],
-                                 columns=["oam_lexicon", "Associated Documents"])
-    
-    # **Display the matrix and document embedding table on the website**
-    table_data = co_matrix_df.reset_index().to_dict("records")
-    table_columns = [{"name": col, "id": col} for col in co_matrix_df.reset_index().columns]
-
-    table_component = dash_table.DataTable(
-        data=table_data,
-        columns=table_columns,
-        style_table={'overflowX': 'scroll', 'maxHeight': '500px', 'overflowY': 'auto'},
-        style_cell={'textAlign': 'center'},
-        page_size=10
-    )
-    
-    embedding_table = dash_table.DataTable(
-        data=embedding_df.to_dict("records"),
-        columns=[{"name": col, "id": col} for col in embedding_df.columns],
-        style_table={'overflowX': 'scroll', 'maxHeight': '500px', 'overflowY': 'auto'},
-        style_cell={'textAlign': 'center'},
-        page_size=10
-    )
-    
-    combined_table = html.Div([
-        html.H4("Co-occurrence Matrix"),
-        table_component,
-        html.H4("Document Embedding Table"),
-        embedding_table
-    ])
-    
-    # Check if download button is triggered
-    ctx = dash.callback_context
-    if ctx.triggered and ctx.triggered[0]["prop_id"].split(".")[0] == "download-btn":
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            co_matrix_df.to_excel(writer, sheet_name="Co-occurrence Matrix")
-            embedding_df.to_excel(writer, sheet_name="Document Embeddings")
-        output.seek(0)
-        return go.Figure(), dcc.send_bytes(output.getvalue(), filename="co_occurrence_matrix.xlsx"), combined_table
-    
-    # Build Network Graph
-    G = nx.Graph()
-    for term in terms:
-        G.add_node(term)
-
-    edges = []
-    for i in range(len(terms)):
-        for j in range(i + 1, len(terms)):
-            weight = co_occurrence_matrix[i, j]
-            if weight >= threshold:
-                G.add_edge(terms[i], terms[j], weight=weight)
-                edges.append((terms[i], terms[j], weight))
-
-    pos = nx.spring_layout(G, seed=42)
-    edge_x, edge_y, edge_text = [], [], []
-    for edge in edges:
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-        edge_text.append(f"{edge[0]} ↔ {edge[1]} ({edge[2]:.2f})")
-
-    node_x, node_y, node_text = [], [], []
-    for node in G.nodes():
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        node_text.append(node)
-
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=1, color="gray"),
-        hoverinfo="text",
-        mode="lines",
-        text=edge_text
-    )
-
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode="markers+text",
-        text=node_text,
-        textposition="top center",
-        hoverinfo="text",
-        marker=dict(size=15, color="lightblue", line=dict(width=2, color="black"))
-    )
-
-    fig = go.Figure(data=[edge_trace, node_trace])
-    fig.update_layout(
-        title='',
-        # title="Keyword Co-occurrence Graph",
-        showlegend=False,
-        hovermode="closest",
-        margin=dict(l=0, r=0, t=40, b=0),
-    )
-
-    # **Create Radar Chart (New Addition)**
-    # print(f"debug tfidf_array={tfidf_array}, type={type(tfidf_array)}, shape={tfidf_array.shape}")
     radar_chart = create_radar_chart_group(tfidf_array, terms, selected_docs)  # Using the first document for illustration
 
-    return fig, None, combined_table, radar_chart
+    return radar_chart
 
 if __name__ == "__main__":
     app.run_server(debug=True)

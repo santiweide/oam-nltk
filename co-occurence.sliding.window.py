@@ -120,16 +120,18 @@ app.layout = dbc.Container([
         dbc.Col(html.Label("Sliding Window Size"), width=4),
         dbc.Col(dcc.Slider(
             id='window-size-slider',
-            min=30, max=180, step=30, value=90,
-            marks={i: str(i*30) for i in range(1, 6)},
+            min=20, max=100, step=20, value=20,
+            marks={i: str(i*20) for i in range(1, 5)},
             tooltip={'placement': 'bottom', 'always_visible': True}
         ), width=8),
     ]),
     
+    html.Hr(),
     dbc.Row([
         dbc.Col(dcc.Graph(id="network-graph"), width=12)
     ]),
 
+    html.Hr(),
     # Matrix display
     dbc.Row([
         dbc.Col(dash_table.DataTable(
