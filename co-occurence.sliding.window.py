@@ -227,6 +227,89 @@ def create_network_figure(matrix):
         marker=dict(
             showscale=True,
             colorscale='YlGnBu',
+            size=10,  # Default size (overridden later)
+            color=[],
+            line_width=2))
+    
+    # Color and size nodes by degree
+    node_degrees = dict(G.degree())
+    node_trace.marker.color = list(node_degrees.values())
+    
+    # Calculate dynamic sizes based on degree
+    degrees = list(node_degrees.values())
+    if degrees:
+        min_deg = min(degrees)
+        max_deg = max(degrees)
+        if min_deg != max_deg:
+            # Scale sizes between 10 and 30
+            sizes = [(deg - min_deg) / (max_deg - min_deg) * 20 + 10 for deg in degrees]
+        else:
+            sizes = [20] * len(degrees)  # Uniform size if all degrees are equal
+    else:
+        sizes = [10] * len(G.nodes())
+    
+    node_trace.marker.size = sizes  # Set adjusted sizes
+    
+    fig = go.Figure(data=[edge_trace, node_trace],
+                 layout=go.Layout(
+                    showlegend=False,
+                    hovermode='closest',
+                    margin=dict(b=0,l=0,r=0,t=0),
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
+    
+    return fig
+
+def create_network_figure_node_color(matrix):
+    """Create network visualization from co-occurrence matrix"""
+    G = nx.Graph()
+    
+    # Add nodes
+    for term in terms:
+        G.add_node(term)
+        
+    # Add edges with weights
+    for i in range(len(terms)):
+        for j in range(i+1, len(terms)):
+            if matrix[i,j] > 0:
+                G.add_edge(terms[i], terms[j], weight=matrix[i,j])
+    
+    # Use force-directed layout with edge weights
+    pos = nx.spring_layout(G, weight='weight', seed=42)
+    
+    # Create Plotly figure
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+        
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines')
+
+    node_x = []
+    node_y = []
+    text = []
+    for node in G.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        text.append(node)
+        
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers+text',
+        text=text,
+        textposition="top center",
+        hoverinfo='text',
+        marker=dict(
+            showscale=True,
+            colorscale='YlGnBu',
             size=10,
             color=[],
             line_width=2))
@@ -255,7 +338,7 @@ def calculate_association_significance(focus_term, association, corpus):
     
     # Perform Fisher's Exact Test
     odds_ratio, p_value = fisher_exact([[a, b], [c, d]])
-    return odds_ratio, p_value
+    return odds_ratio, p_value, fisher_exact
 
 @app.callback(
     Output("matrix-table", "data"),
@@ -275,8 +358,7 @@ def update_matrix(selected_docs, window_size):
     significance_matrix = np.zeros((len(terms), len(terms)))
 
     term_to_index = {term: i for i, term in enumerate(terms)}
-    # print(f"debug synonym_to_term={synonym_to_term}\n length of the selected docs={len(selected_docs)}")
-    # Process documents
+
     corpus = [documents[doc_idx][1].lower() for doc_idx in selected_docs]  # Preprocess the selected documents
     for doc_idx in selected_docs:
         text = documents[doc_idx][1].lower()
@@ -292,11 +374,11 @@ def update_matrix(selected_docs, window_size):
                     matrix[idx1, idx2] += 1
                     matrix[idx2, idx1] += 1 
 
-                    # Perform significance testing (Fisher's Exact Test)
-                    odds_ratio, p_value = calculate_association_significance(term1, term2, corpus)
+                    odds_ratio, p_value, fisher_exact = calculate_association_significance(term1, term2, corpus)
                     significance_matrix[idx1, idx2] = p_value
                     significance_matrix[idx2, idx1] = p_value  # Symmetric matrix for p-values
-    
+
+    # TODO filter the matrix value according to the fisher_exact, when fisher_exact[i][j]>0.05, the matrix value should be 0
     print(matrix)
     sum_val = matrix.sum()
     matrix /= sum_val
